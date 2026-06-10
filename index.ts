@@ -18,6 +18,10 @@ import {
   CHECK_IF_MINT_IS_RENOUNCED,
   CHECK_IF_FREEZABLE,
   CHECK_IF_BURNED,
+  CHECK_IF_HONEYPOT,
+  MAX_TOKEN_TAX,
+  CHECK_TOP_HOLDERS,
+  MAX_TOP_HOLDER_PERCENTAGE,
   QUOTE_MINT,
   MAX_POOL_SIZE,
   MIN_POOL_SIZE,
@@ -35,6 +39,9 @@ import {
   CACHE_NEW_MARKETS,
   TAKE_PROFIT,
   STOP_LOSS,
+  TRAILING_STOP_LOSS,
+  PARTIAL_TAKE_PROFIT,
+  PARTIAL_SELL_PERCENT,
   BUY_SLIPPAGE,
   SELL_SLIPPAGE,
   PRICE_CHECK_DURATION,
@@ -108,6 +115,14 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Price check duration: ${botConfig.priceCheckDuration} ms`);
   logger.info(`Take profit: ${botConfig.takeProfit}%`);
   logger.info(`Stop loss: ${botConfig.stopLoss}%`);
+  logger.info(`Trailing stop loss: ${botConfig.trailingStopLoss > 0 ? `${botConfig.trailingStopLoss}%` : 'disabled'}`);
+  logger.info(
+    `Partial take profit: ${
+      botConfig.partialTakeProfit > 0 && botConfig.partialSellPercent > 0
+        ? `sell ${botConfig.partialSellPercent}% at +${botConfig.partialTakeProfit}%`
+        : 'disabled'
+    }`,
+  );
 
   logger.info('- Snipe list -');
   logger.info(`Snipe list: ${botConfig.useSnipeList}`);
@@ -124,6 +139,9 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Check renounced: ${botConfig.checkRenounced}`);
     logger.info(`Check freezable: ${botConfig.checkFreezable}`);
     logger.info(`Check burned: ${botConfig.checkBurned}`);
+    logger.info(`Check honeypot: ${CHECK_IF_HONEYPOT}`);
+    logger.info(`Max token tax: ${MAX_TOKEN_TAX >= 10000 ? 'disabled' : `${(MAX_TOKEN_TAX / 100).toFixed(2)}%`}`);
+    logger.info(`Check top holders: ${CHECK_TOP_HOLDERS}${CHECK_TOP_HOLDERS ? ` (max ${MAX_TOP_HOLDER_PERCENTAGE}%)` : ''}`);
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
   }
@@ -179,6 +197,9 @@ const runListener = async () => {
     unitPrice: COMPUTE_UNIT_PRICE,
     takeProfit: TAKE_PROFIT,
     stopLoss: STOP_LOSS,
+    trailingStopLoss: TRAILING_STOP_LOSS,
+    partialTakeProfit: PARTIAL_TAKE_PROFIT,
+    partialSellPercent: PARTIAL_SELL_PERCENT,
     buySlippage: BUY_SLIPPAGE,
     sellSlippage: SELL_SLIPPAGE,
     priceCheckInterval: PRICE_CHECK_INTERVAL,

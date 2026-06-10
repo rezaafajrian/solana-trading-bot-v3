@@ -45,6 +45,9 @@ export interface BotConfig {
   unitPrice: number;
   takeProfit: number;
   stopLoss: number;
+  trailingStopLoss: number;
+  partialTakeProfit: number;
+  partialSellPercent: number;
   buySlippage: number;
   sellSlippage: number;
   priceCheckInterval: number;
@@ -63,6 +66,10 @@ export class Bot {
   // one token at the time
   private readonly mutex: Mutex;
   private sellExecutionCount = 0;
+
+  // guards against the wallet listener re-entering sell() for the same mint
+  // while a (possibly multi-stage) sell is already in progress
+  private readonly sellingMints = new Set<string>();
   public readonly isWarp: boolean = false;
   public readonly isJito: boolean = false;
 
@@ -197,17 +204,27 @@ export class Bot {
   }
 
   public async sell(accountId: PublicKey, rawAccount: RawAccount) {
+    const mint = rawAccount.mint.toString();
+
+    // A partial take-profit changes the token balance, which makes the wallet
+    // listener fire sell() again for the same mint. Skip those re-entrant calls.
+    if (this.sellingMints.has(mint)) {
+      return;
+    }
+
     if (this.config.oneTokenAtATime) {
       this.sellExecutionCount++;
     }
 
+    this.sellingMints.add(mint);
+
     try {
       logger.trace({ mint: rawAccount.mint }, `Processing new token...`);
 
-      const poolData = await this.poolStorage.get(rawAccount.mint.toString());
+      const poolData = await this.poolStorage.get(mint);
 
       if (!poolData) {
-        logger.trace({ mint: rawAccount.mint.toString() }, `Token pool data is not found, can't sell`);
+        logger.trace({ mint }, `Token pool data is not found, can't sell`);
         return;
       }
 
@@ -215,7 +232,7 @@ export class Bot {
       const tokenAmountIn = new TokenAmount(tokenIn, rawAccount.amount, true);
 
       if (tokenAmountIn.isZero()) {
-        logger.info({ mint: rawAccount.mint.toString() }, `Empty balance, can't sell`);
+        logger.info({ mint }, `Empty balance, can't sell`);
         return;
       }
 
@@ -227,59 +244,158 @@ export class Bot {
       const market = await this.marketStorage.get(poolData.state.marketId.toString());
       const poolKeys: LiquidityPoolKeysV4 = createPoolKeys(new PublicKey(poolData.id), poolData.state, market);
 
-      await this.priceMatch(tokenAmountIn, poolKeys);
+      // When price checks are disabled, sell the whole balance immediately.
+      if (this.config.priceCheckDuration === 0 || this.config.priceCheckInterval === 0) {
+        await this.executeSell(accountId, poolKeys, tokenIn, tokenAmountIn, true);
+        return;
+      }
 
-      for (let i = 0; i < this.config.maxSellRetries; i++) {
+      // Otherwise monitor price and exit using take profit, stop loss, an optional
+      // partial take-profit, an optional trailing stop, and the timed fallback.
+      let remaining = tokenAmountIn;
+      let partialTaken = false;
+
+      const timesToCheck = this.config.priceCheckDuration / this.config.priceCheckInterval;
+      const slippage = new Percent(this.config.sellSlippage, 100);
+      const takeProfit = this.percentOf(this.config.quoteAmount, this.config.takeProfit, 'add');
+      const stopLoss = this.percentOf(this.config.quoteAmount, this.config.stopLoss, 'subtract');
+      const partialTarget =
+        this.config.partialTakeProfit > 0
+          ? this.percentOf(this.config.quoteAmount, this.config.partialTakeProfit, 'add')
+          : undefined;
+
+      let peak: TokenAmount | undefined;
+      let timesChecked = 0;
+      let exited = false;
+
+      do {
         try {
-          logger.info(
-            { mint: rawAccount.mint },
-            `Send sell transaction attempt: ${i + 1}/${this.config.maxSellRetries}`,
-          );
+          const poolInfo = await Liquidity.fetchInfo({ connection: this.connection, poolKeys });
 
-          const result = await this.swap(
+          // Use the full original position as the price signal so the PnL
+          // comparison against the cost basis stays consistent after a partial sell.
+          const amountOut = Liquidity.computeAmountOut({
             poolKeys,
-            accountId,
-            this.config.quoteAta,
-            tokenIn,
-            this.config.quoteToken,
-            tokenAmountIn,
-            this.config.sellSlippage,
-            this.config.wallet,
-            'sell',
+            poolInfo,
+            amountIn: tokenAmountIn,
+            currencyOut: this.config.quoteToken,
+            slippage,
+          }).amountOut as TokenAmount;
+
+          if (!peak || amountOut.gt(peak)) {
+            peak = amountOut;
+          }
+
+          const trailingStop =
+            this.config.trailingStopLoss > 0 && peak.gt(this.config.quoteAmount)
+              ? this.percentOf(peak, this.config.trailingStopLoss, 'subtract')
+              : undefined;
+
+          logger.debug(
+            { mint: poolKeys.baseMint.toString() },
+            `Take profit: ${takeProfit.toFixed()} | Stop loss: ${stopLoss.toFixed()} | ` +
+              `${trailingStop ? `Trailing: ${trailingStop.toFixed()} | ` : ''}Current: ${amountOut.toFixed()}`,
           );
 
-          if (result.confirmed) {
-            logger.info(
-              {
-                dex: `https://dexscreener.com/solana/${rawAccount.mint.toString()}?maker=${this.config.wallet.publicKey}`,
-                mint: rawAccount.mint.toString(),
-                signature: result.signature,
-                url: `https://solscan.io/tx/${result.signature}?cluster=${NETWORK}`,
-              },
-              `Confirmed sell tx`,
-            );
+          if (amountOut.lt(stopLoss) || amountOut.gt(takeProfit) || (trailingStop && amountOut.lt(trailingStop))) {
+            await this.executeSell(accountId, poolKeys, tokenIn, remaining, true);
+            exited = true;
             break;
           }
 
-          logger.info(
-            {
-              mint: rawAccount.mint.toString(),
-              signature: result.signature,
-              error: result.error,
-            },
-            `Error confirming sell tx`,
-          );
-        } catch (error) {
-          logger.debug({ mint: rawAccount.mint.toString(), error }, `Error confirming sell transaction`);
+          if (!partialTaken && partialTarget && this.config.partialSellPercent > 0 && amountOut.gt(partialTarget)) {
+            const portion = new TokenAmount(tokenIn, remaining.raw.muln(this.config.partialSellPercent).divn(100), true);
+
+            if (!portion.isZero()) {
+              logger.info(
+                { mint: poolKeys.baseMint.toString() },
+                `Partial take profit hit, selling ${this.config.partialSellPercent}% and trailing the rest`,
+              );
+
+              const sold = await this.executeSell(accountId, poolKeys, tokenIn, portion, false);
+
+              if (sold) {
+                remaining = new TokenAmount(tokenIn, remaining.raw.sub(portion.raw), true);
+                partialTaken = true;
+              }
+            }
+          }
+
+          await sleep(this.config.priceCheckInterval);
+        } catch (e) {
+          logger.trace({ mint: poolKeys.baseMint.toString(), e }, `Failed to check token price`);
+        } finally {
+          timesChecked++;
         }
+      } while (timesChecked < timesToCheck);
+
+      // Timed exit: never hit a target, so sell whatever is left and close the account.
+      if (!exited && !remaining.isZero()) {
+        await this.executeSell(accountId, poolKeys, tokenIn, remaining, true);
       }
     } catch (error) {
-      logger.error({ mint: rawAccount.mint.toString(), error }, `Failed to sell token`);
+      logger.error({ mint, error }, `Failed to sell token`);
     } finally {
+      this.sellingMints.delete(mint);
       if (this.config.oneTokenAtATime) {
         this.sellExecutionCount--;
       }
     }
+  }
+
+  private async executeSell(
+    accountId: PublicKey,
+    poolKeys: LiquidityPoolKeysV4,
+    tokenIn: Token,
+    amountIn: TokenAmount,
+    closeAccount: boolean,
+  ): Promise<boolean> {
+    const mint = tokenIn.mint.toString();
+
+    for (let i = 0; i < this.config.maxSellRetries; i++) {
+      try {
+        logger.info({ mint }, `Send sell transaction attempt: ${i + 1}/${this.config.maxSellRetries}`);
+
+        const result = await this.swap(
+          poolKeys,
+          accountId,
+          this.config.quoteAta,
+          tokenIn,
+          this.config.quoteToken,
+          amountIn,
+          this.config.sellSlippage,
+          this.config.wallet,
+          'sell',
+          closeAccount,
+        );
+
+        if (result.confirmed) {
+          logger.info(
+            {
+              dex: `https://dexscreener.com/solana/${mint}?maker=${this.config.wallet.publicKey}`,
+              mint,
+              signature: result.signature,
+              url: `https://solscan.io/tx/${result.signature}?cluster=${NETWORK}`,
+            },
+            `Confirmed sell tx`,
+          );
+          return true;
+        }
+
+        logger.info({ mint, signature: result.signature, error: result.error }, `Error confirming sell tx`);
+      } catch (error) {
+        logger.debug({ mint, error }, `Error confirming sell transaction`);
+      }
+    }
+
+    return false;
+  }
+
+  // Returns `amount` increased or decreased by `percent` percent.
+  private percentOf(amount: TokenAmount, percent: number, op: 'add' | 'subtract'): TokenAmount {
+    const fraction = amount.mul(percent).numerator.div(new BN(100));
+    const delta = new TokenAmount(this.config.quoteToken, fraction, true);
+    return op === 'add' ? amount.add(delta) : amount.subtract(delta);
   }
 
   // noinspection JSUnusedLocalSymbols
@@ -293,6 +409,7 @@ export class Bot {
     slippage: number,
     wallet: Keypair,
     direction: 'buy' | 'sell',
+    closeAccount: boolean = true,
   ) {
     const slippagePercent = new Percent(slippage, 100);
     const poolInfo = await Liquidity.fetchInfo({
@@ -344,7 +461,9 @@ export class Bot {
             ]
           : []),
         ...innerTransaction.instructions,
-        ...(direction === 'sell' ? [createCloseAccountInstruction(ataIn, wallet.publicKey, wallet.publicKey)] : []),
+        ...(direction === 'sell' && closeAccount
+          ? [createCloseAccountInstruction(ataIn, wallet.publicKey, wallet.publicKey)]
+          : []),
       ],
     }).compileToV0Message();
 
@@ -388,58 +507,5 @@ export class Bot {
     } while (timesChecked < timesToCheck);
 
     return false;
-  }
-
-  private async priceMatch(amountIn: TokenAmount, poolKeys: LiquidityPoolKeysV4) {
-    if (this.config.priceCheckDuration === 0 || this.config.priceCheckInterval === 0) {
-      return;
-    }
-
-    const timesToCheck = this.config.priceCheckDuration / this.config.priceCheckInterval;
-    const profitFraction = this.config.quoteAmount.mul(this.config.takeProfit).numerator.div(new BN(100));
-    const profitAmount = new TokenAmount(this.config.quoteToken, profitFraction, true);
-    const takeProfit = this.config.quoteAmount.add(profitAmount);
-
-    const lossFraction = this.config.quoteAmount.mul(this.config.stopLoss).numerator.div(new BN(100));
-    const lossAmount = new TokenAmount(this.config.quoteToken, lossFraction, true);
-    const stopLoss = this.config.quoteAmount.subtract(lossAmount);
-    const slippage = new Percent(this.config.sellSlippage, 100);
-    let timesChecked = 0;
-
-    do {
-      try {
-        const poolInfo = await Liquidity.fetchInfo({
-          connection: this.connection,
-          poolKeys,
-        });
-
-        const amountOut = Liquidity.computeAmountOut({
-          poolKeys,
-          poolInfo,
-          amountIn: amountIn,
-          currencyOut: this.config.quoteToken,
-          slippage,
-        }).amountOut;
-
-        logger.debug(
-          { mint: poolKeys.baseMint.toString() },
-          `Take profit: ${takeProfit.toFixed()} | Stop loss: ${stopLoss.toFixed()} | Current: ${amountOut.toFixed()}`,
-        );
-
-        if (amountOut.lt(stopLoss)) {
-          break;
-        }
-
-        if (amountOut.gt(takeProfit)) {
-          break;
-        }
-
-        await sleep(this.config.priceCheckInterval);
-      } catch (e) {
-        logger.trace({ mint: poolKeys.baseMint.toString(), e }, `Failed to check token price`);
-      } finally {
-        timesChecked++;
-      }
-    } while (timesChecked < timesToCheck);
   }
 }

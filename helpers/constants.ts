@@ -49,6 +49,9 @@ export const STOP_LOSS = Number(retrieveEnvVariable('STOP_LOSS', logger));
 export const PRICE_CHECK_INTERVAL = Number(retrieveEnvVariable('PRICE_CHECK_INTERVAL', logger));
 export const PRICE_CHECK_DURATION = Number(retrieveEnvVariable('PRICE_CHECK_DURATION', logger));
 export const SELL_SLIPPAGE = Number(retrieveEnvVariable('SELL_SLIPPAGE', logger));
+export const TRAILING_STOP_LOSS = Number(process.env.TRAILING_STOP_LOSS ?? '0');
+export const PARTIAL_TAKE_PROFIT = Number(process.env.PARTIAL_TAKE_PROFIT ?? '0');
+export const PARTIAL_SELL_PERCENT = Number(process.env.PARTIAL_SELL_PERCENT ?? '0');
 
 // Filters
 export const FILTER_CHECK_INTERVAL = Number(retrieveEnvVariable('FILTER_CHECK_INTERVAL', logger));
@@ -59,6 +62,10 @@ export const CHECK_IF_SOCIALS = retrieveEnvVariable('CHECK_IF_SOCIALS', logger) 
 export const CHECK_IF_MINT_IS_RENOUNCED = retrieveEnvVariable('CHECK_IF_MINT_IS_RENOUNCED', logger) === 'true';
 export const CHECK_IF_FREEZABLE = retrieveEnvVariable('CHECK_IF_FREEZABLE', logger) === 'true';
 export const CHECK_IF_BURNED = retrieveEnvVariable('CHECK_IF_BURNED', logger) === 'true';
+export const CHECK_IF_HONEYPOT = (process.env.CHECK_IF_HONEYPOT ?? 'true') === 'true';
+export const MAX_TOKEN_TAX = Number(process.env.MAX_TOKEN_TAX ?? '10000');
+export const CHECK_TOP_HOLDERS = (process.env.CHECK_TOP_HOLDERS ?? 'false') === 'true';
+export const MAX_TOP_HOLDER_PERCENTAGE = Number(process.env.MAX_TOP_HOLDER_PERCENTAGE ?? '30');
 export const MIN_POOL_SIZE = retrieveEnvVariable('MIN_POOL_SIZE', logger);
 export const MAX_POOL_SIZE = retrieveEnvVariable('MAX_POOL_SIZE', logger);
 export const USE_SNIPE_LIST = retrieveEnvVariable('USE_SNIPE_LIST', logger) === 'true';

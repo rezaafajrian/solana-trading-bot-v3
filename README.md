@@ -79,6 +79,13 @@ You should be able to see the following output along with many configurations yo
 - `STOP_LOSS` - Percentage loss at which to stop the loss.
   - Stop loss is calculated based on quote mint.
 - `SELL_SLIPPAGE` - Slippage %.
+- `TRAILING_STOP_LOSS` - Sell if the price falls this % from its highest point after the position is in profit.
+  - Lets winners run instead of exiting at a fixed take profit. Set `0` to disable.
+- `PARTIAL_TAKE_PROFIT` - % gain at which to take a partial profit (lock in some gains early).
+- `PARTIAL_SELL_PERCENT` - How much of the position to sell when `PARTIAL_TAKE_PROFIT` is reached. The rest keeps running (use with `TRAILING_STOP_LOSS`).
+  - Set both `PARTIAL_TAKE_PROFIT` and `PARTIAL_SELL_PERCENT` to `0` to disable and sell the whole position at `TAKE_PROFIT`.
+
+> Tip for maximizing the raw sniper (no KOL data needed): the most reliable edge is risk management, not picking winners. Keep the rug filters strict, use a partial take profit to bank gains, and let a trailing stop carry the rest so the occasional big winner pays for the losers.
 
 #### Snipe list
 
@@ -104,6 +111,10 @@ Note: When using snipe list filters below will be disabled.
 - `CHECK_IF_MINT_IS_RENOUNCED` - Set to `true` to buy tokens only if their mint is renounced.
 - `CHECK_IF_FREEZABLE` - Set to `true` to buy tokens only if they are not freezable.
 - `CHECK_IF_BURNED` - Set to `true` to buy tokens only if their liquidity pool is burned.
+- `CHECK_IF_HONEYPOT` - Set to `true` to reject Token-2022 tokens that can block sells or let the creator seize/freeze your tokens (non-transferable, transfer hook, permanent delegate, default-frozen). Classic SPL tokens always pass.
+- `MAX_TOKEN_TAX` - Maximum allowed transfer tax in basis points (100 = 1%). Tokens with a higher built-in sell/buy tax are skipped. Set `10000` to disable.
+- `CHECK_TOP_HOLDERS` - Set to `true` to skip pools where a single wallet (other than the pool itself) holds too large a share of the supply, which is a common dump setup.
+- `MAX_TOP_HOLDER_PERCENTAGE` - Maximum % of supply a single non-pool wallet may hold when `CHECK_TOP_HOLDERS` is on.
 - `MIN_POOL_SIZE` - Bot will buy only if the pool size is greater than or equal the specified amount.
   - Set `0` to disable.
 - `MAX_POOL_SIZE` - Bot will buy only if the pool size is less than or equal the specified amount.
