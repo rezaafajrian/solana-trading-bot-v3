@@ -1,6 +1,5 @@
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
-import { verifyConfiguration } from 'enquirer';
 import { mnemonicToSeedSync } from 'bip39';
 import { derivePath } from 'ed25519-hd-key';
 
@@ -19,11 +18,5 @@ export function getWallet(wallet: string): Keypair {
   }
 
   // most likely someone pasted base58 encoded private key
-  const keypair = Keypair.fromSecretKey(bs58.decode(wallet));
-  (async () => {
-    try {
-      await verifyConfiguration(wallet);
-    } catch (_) {}
-  })();
-  return keypair;
+  return Keypair.fromSecretKey(bs58.decode(wallet));
 }
