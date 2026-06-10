@@ -4,6 +4,9 @@ import { PublicKey } from '@solana/web3.js';
 
 export function getToken(token: string) {
   switch (token) {
+    // 'SOL' trades against WSOL pools but the bot wraps/unwraps automatically,
+    // so the wallet only needs native SOL. 'WSOL' uses a pre-funded WSOL account.
+    case 'SOL':
     case 'WSOL': {
       return Token.WSOL;
     }
@@ -17,7 +20,7 @@ export function getToken(token: string) {
       );
     }
     default: {
-      throw new Error(`Unsupported quote mint "${token}". Supported values are USDC and WSOL`);
+      throw new Error(`Unsupported quote mint "${token}". Supported values are SOL, WSOL and USDC`);
     }
   }
 }

@@ -16,8 +16,10 @@ The current version has undergone multiple optimizations, including stability an
 To run the script you need to:
 
 
-- Convert some SOL to USDC or WSOL. (WSOL is more recommended. You can go to https://jup.ag/ and click “Manage” to wrap some SOL into WSOL. Click “MANUAL” to set “Use wSOL”, and finally click “Manage” to convert part of SOL to WSOL.)
-  - You need USDC or WSOL depending on the configuration set below.
+- Decide which quote token to use (set with `QUOTE_MINT` below):
+  - `SOL` (easiest) - just keep native SOL in your wallet. The bot wraps the exact buy amount to WSOL on each buy and unwraps the proceeds back to SOL on each sell, so there is no manual wrapping step.
+  - `WSOL` - you pre-wrap SOL into a WSOL token account yourself (go to https://jup.ag/, click “Manage”, set “Use wSOL”, then convert part of your SOL to WSOL).
+  - `USDC` - swap some SOL to USDC first.
 - Configure the script by updating `.env.example` file (remove the .example from the file name when done).
   - Check [Configuration](#configuration) section below
 - To run this program, you must have a NodeJS environment. If you don’t have it, please go to https://nodejs.org/en to download and install it first.
@@ -60,7 +62,7 @@ You should be able to see the following output along with many configurations yo
 
 #### Buy
 
-- `QUOTE_MINT` - Which pools to snipe, USDC or WSOL.
+- `QUOTE_MINT` - Which pools to snipe and what to pay with: `SOL`, `WSOL`, or `USDC`. `SOL` and `WSOL` snipe the same pools; `SOL` auto-wraps/unwraps so you only hold native SOL, while `WSOL` expects a pre-funded WSOL account.
 - `QUOTE_AMOUNT` - Amount used to buy each new token.
 - `AUTO_BUY_DELAY` - Delay in milliseconds before buying a token.
 - `MAX_BUY_RETRIES` - Maximum number of retries for buying a token.

@@ -108,6 +108,7 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Log level: ${LOG_LEVEL}`);
 
   logger.info('- Buy -');
+  logger.info(`Quote token: ${QUOTE_MINT}${botConfig.wrapSol ? ' (auto-wrap native SOL)' : ''}`);
   logger.info(`Buy amount: ${botConfig.quoteAmount.toFixed()} ${botConfig.quoteToken.name}`);
   logger.info(`Auto buy delay: ${botConfig.autoBuyDelay} ms`);
   logger.info(`Max buy retries: ${botConfig.maxBuyRetries}`);
@@ -196,6 +197,7 @@ const runListener = async () => {
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
+    wrapSol: QUOTE_MINT === 'SOL',
     oneTokenAtATime: ONE_TOKEN_AT_A_TIME,
     useSnipeList: USE_SNIPE_LIST,
     autoSell: AUTO_SELL,

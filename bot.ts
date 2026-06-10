@@ -3,14 +3,17 @@ import {
   Connection,
   Keypair,
   PublicKey,
+  SystemProgram,
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js';
 import {
   createAssociatedTokenAccountIdempotentInstruction,
   createCloseAccountInstruction,
+  createSyncNativeInstruction,
   getAccount,
   getAssociatedTokenAddress,
+  NATIVE_MINT,
   RawAccount,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
@@ -34,6 +37,9 @@ export interface BotConfig {
   quoteToken: Token;
   quoteAmount: TokenAmount;
   quoteAta: PublicKey;
+  // When true the quote is native SOL: the WSOL account is wrapped on buy and
+  // unwrapped (closed) on sell, so the wallet only needs to hold native SOL.
+  wrapSol: boolean;
   oneTokenAtATime: boolean;
   useSnipeList: boolean;
   autoSell: boolean;
@@ -100,6 +106,24 @@ export class Bot {
   }
 
   async validate() {
+    // When wrapping native SOL the WSOL account is created per trade, so it does
+    // not need to exist up front — just make sure the wallet holds some SOL.
+    if (this.config.wrapSol) {
+      try {
+        const balance = await this.connection.getBalance(this.config.wallet.publicKey, this.connection.commitment);
+
+        if (balance <= 0) {
+          logger.error(`Wallet has no SOL balance: ${this.config.wallet.publicKey.toString()}`);
+          return false;
+        }
+      } catch (error) {
+        logger.error(`Failed to fetch SOL balance for wallet: ${this.config.wallet.publicKey.toString()}`);
+        return false;
+      }
+
+      return true;
+    }
+
     try {
       await getAccount(this.connection, this.config.quoteAta, this.connection.commitment);
     } catch (error) {
@@ -461,6 +485,13 @@ export class Bot {
       poolKeys.version,
     );
 
+    // `quoteAta` is the WSOL account. On buy it is the input, on sell the output.
+    const wrapSol = this.config.wrapSol;
+    const quoteAta = this.config.quoteAta;
+    // Unwrap (close the WSOL account back to native SOL) after a full trade, never
+    // after a partial sell (proceeds stay wrapped until the final sell closes it).
+    const unwrapSol = wrapSol && (direction === 'buy' || (direction === 'sell' && closeAccount));
+
     const messageV0 = new TransactionMessage({
       payerKey: wallet.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
@@ -481,10 +512,28 @@ export class Bot {
               ),
             ]
           : []),
+        // Native SOL: make sure the WSOL account exists, and on buy wrap the input amount into it.
+        ...(wrapSol
+          ? [
+              createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, quoteAta, wallet.publicKey, NATIVE_MINT),
+              ...(direction === 'buy'
+                ? [
+                    SystemProgram.transfer({
+                      fromPubkey: wallet.publicKey,
+                      toPubkey: quoteAta,
+                      lamports: BigInt(amountIn.raw.toString()),
+                    }),
+                    createSyncNativeInstruction(quoteAta),
+                  ]
+                : []),
+            ]
+          : []),
         ...innerTransaction.instructions,
         ...(direction === 'sell' && closeAccount
           ? [createCloseAccountInstruction(ataIn, wallet.publicKey, wallet.publicKey)]
           : []),
+        // Native SOL: unwrap by closing the WSOL account, returning lamports to the wallet.
+        ...(unwrapSol ? [createCloseAccountInstruction(quoteAta, wallet.publicKey, wallet.publicKey)] : []),
       ],
     }).compileToV0Message();
 
@@ -576,6 +625,23 @@ export class Bot {
             this.config.wallet.publicKey,
             tokenMint.mint,
           ),
+          // Native SOL: wrap the buy amount so the simulated buy has WSOL to spend.
+          ...(this.config.wrapSol
+            ? [
+                createAssociatedTokenAccountIdempotentInstruction(
+                  this.config.wallet.publicKey,
+                  this.config.quoteAta,
+                  this.config.wallet.publicKey,
+                  NATIVE_MINT,
+                ),
+                SystemProgram.transfer({
+                  fromPubkey: this.config.wallet.publicKey,
+                  toPubkey: this.config.quoteAta,
+                  lamports: BigInt(this.config.quoteAmount.raw.toString()),
+                }),
+                createSyncNativeInstruction(this.config.quoteAta),
+              ]
+            : []),
           ...buyIx.instructions,
           ...sellIx.instructions,
         ],
