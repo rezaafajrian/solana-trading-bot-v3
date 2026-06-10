@@ -43,6 +43,9 @@ export interface BotConfig {
   maxSellRetries: number;
   unitLimit: number;
   unitPrice: number;
+  dynamicUnitPrice: boolean;
+  maxUnitPrice: number;
+  simulateSellBeforeBuy: boolean;
   takeProfit: number;
   stopLoss: number;
   trailingStopLoss: number;
@@ -146,6 +149,18 @@ export class Bot {
 
         if (!match) {
           logger.trace({ mint: poolKeys.baseMint.toString() }, `Skipping buy because pool doesn't match filters`);
+          return;
+        }
+      }
+
+      if (this.config.simulateSellBeforeBuy) {
+        const sellable = await this.checkSellable(poolKeys, mintAta);
+
+        if (!sellable) {
+          logger.trace(
+            { mint: poolKeys.baseMint.toString() },
+            `Skipping buy because the sell simulation failed (likely honeypot)`,
+          );
           return;
         }
       }
@@ -425,6 +440,12 @@ export class Bot {
       slippage: slippagePercent,
     });
 
+    const useComputeBudget = !this.isWarp && !this.isJito;
+    const unitPrice =
+      useComputeBudget && this.config.dynamicUnitPrice
+        ? await this.getDynamicUnitPrice(poolKeys)
+        : this.config.unitPrice;
+
     const latestBlockhash = await this.connection.getLatestBlockhash();
     const { innerTransaction } = Liquidity.makeSwapFixedInInstruction(
       {
@@ -444,10 +465,10 @@ export class Bot {
       payerKey: wallet.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
       instructions: [
-        ...(this.isWarp || this.isJito
+        ...(!useComputeBudget
           ? []
           : [
-              ComputeBudgetProgram.setComputeUnitPrice({ microLamports: this.config.unitPrice }),
+              ComputeBudgetProgram.setComputeUnitPrice({ microLamports: unitPrice }),
               ComputeBudgetProgram.setComputeUnitLimit({ units: this.config.unitLimit }),
             ]),
         ...(direction === 'buy'
@@ -471,6 +492,117 @@ export class Bot {
     transaction.sign([wallet, ...innerTransaction.signers]);
 
     return this.txExecutor.executeAndConfirm(transaction, wallet, latestBlockhash);
+  }
+
+  // Picks a compute unit price based on recent network congestion for the pool's
+  // accounts. Clamped between the configured floor (unitPrice) and maxUnitPrice.
+  private async getDynamicUnitPrice(poolKeys: LiquidityPoolKeysV4): Promise<number> {
+    try {
+      const fees = await this.connection.getRecentPrioritizationFees({
+        lockedWritableAccounts: [poolKeys.id, poolKeys.baseVault, poolKeys.quoteVault],
+      });
+
+      const nonZero = fees
+        .map((f) => f.prioritizationFee)
+        .filter((f) => f > 0)
+        .sort((a, b) => a - b);
+
+      if (nonZero.length === 0) {
+        return this.config.unitPrice;
+      }
+
+      // 75th percentile, bumped 25% to stay ahead of the pack.
+      const index = Math.min(Math.floor(nonZero.length * 0.75), nonZero.length - 1);
+      const target = Math.ceil(nonZero[index] * 1.25);
+      const price = Math.min(Math.max(target, this.config.unitPrice), this.config.maxUnitPrice);
+
+      logger.trace({ mint: poolKeys.baseMint.toString() }, `Dynamic compute unit price: ${price} micro lamports`);
+      return price;
+    } catch (e) {
+      logger.trace({ mint: poolKeys.baseMint.toString(), e }, `Failed to fetch dynamic priority fee, using static`);
+      return this.config.unitPrice;
+    }
+  }
+
+  // Simulates a buy->sell round trip on-chain before buying. If the sell leg fails,
+  // the token is almost certainly a honeypot, so we skip it. If the simulation
+  // itself cannot run (RPC issue), we proceed rather than miss every trade.
+  private async checkSellable(poolKeys: LiquidityPoolKeysV4, tokenAta: PublicKey): Promise<boolean> {
+    try {
+      const tokenMint = new Token(TOKEN_PROGRAM_ID, poolKeys.baseMint, poolKeys.baseDecimals);
+      const slippage = new Percent(this.config.buySlippage, 100);
+      const poolInfo = await Liquidity.fetchInfo({ connection: this.connection, poolKeys });
+
+      const buyOut = Liquidity.computeAmountOut({
+        poolKeys,
+        poolInfo,
+        amountIn: this.config.quoteAmount,
+        currencyOut: tokenMint,
+        slippage,
+      });
+
+      // We are guaranteed to receive at least minAmountOut, so use that as the sell input.
+      const sellAmount = new TokenAmount(tokenMint, buyOut.minAmountOut.raw, true);
+
+      const { innerTransaction: buyIx } = Liquidity.makeSwapFixedInInstruction(
+        {
+          poolKeys,
+          userKeys: { tokenAccountIn: this.config.quoteAta, tokenAccountOut: tokenAta, owner: this.config.wallet.publicKey },
+          amountIn: this.config.quoteAmount.raw,
+          minAmountOut: buyOut.minAmountOut.raw,
+        },
+        poolKeys.version,
+      );
+
+      const { innerTransaction: sellIx } = Liquidity.makeSwapFixedInInstruction(
+        {
+          poolKeys,
+          userKeys: { tokenAccountIn: tokenAta, tokenAccountOut: this.config.quoteAta, owner: this.config.wallet.publicKey },
+          amountIn: sellAmount.raw,
+          minAmountOut: new BN(0),
+        },
+        poolKeys.version,
+      );
+
+      const latestBlockhash = await this.connection.getLatestBlockhash();
+      const messageV0 = new TransactionMessage({
+        payerKey: this.config.wallet.publicKey,
+        recentBlockhash: latestBlockhash.blockhash,
+        instructions: [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+          createAssociatedTokenAccountIdempotentInstruction(
+            this.config.wallet.publicKey,
+            tokenAta,
+            this.config.wallet.publicKey,
+            tokenMint.mint,
+          ),
+          ...buyIx.instructions,
+          ...sellIx.instructions,
+        ],
+      }).compileToV0Message();
+
+      const transaction = new VersionedTransaction(messageV0);
+      transaction.sign([this.config.wallet, ...buyIx.signers, ...sellIx.signers]);
+
+      const simulation = await this.connection.simulateTransaction(transaction, {
+        sigVerify: false,
+        replaceRecentBlockhash: true,
+        commitment: this.connection.commitment,
+      });
+
+      if (simulation.value.err) {
+        logger.debug(
+          { mint: poolKeys.baseMint.toString(), err: simulation.value.err },
+          `Sellability simulation failed -> likely honeypot`,
+        );
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      logger.trace({ mint: poolKeys.baseMint.toString(), e }, `Sellability simulation could not run, proceeding`);
+      return true;
+    }
   }
 
   private async filterMatch(poolKeys: LiquidityPoolKeysV4) {

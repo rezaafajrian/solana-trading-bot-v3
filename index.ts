@@ -22,6 +22,8 @@ import {
   MAX_TOKEN_TAX,
   CHECK_TOP_HOLDERS,
   MAX_TOP_HOLDER_PERCENTAGE,
+  CHECK_LP_LOCKED,
+  MIN_LP_LOCKED_PERCENT,
   QUOTE_MINT,
   MAX_POOL_SIZE,
   MIN_POOL_SIZE,
@@ -36,6 +38,9 @@ import {
   AUTO_BUY_DELAY,
   COMPUTE_UNIT_LIMIT,
   COMPUTE_UNIT_PRICE,
+  DYNAMIC_COMPUTE_UNIT_PRICE,
+  MAX_COMPUTE_UNIT_PRICE,
+  SIMULATE_SELL_BEFORE_BUY,
   CACHE_NEW_MARKETS,
   TAKE_PROFIT,
   STOP_LOSS,
@@ -92,6 +97,9 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   } else {
     logger.info(`Compute Unit limit: ${botConfig.unitLimit}`);
     logger.info(`Compute Unit price (micro lamports): ${botConfig.unitPrice}`);
+    logger.info(
+      `Dynamic compute unit price: ${botConfig.dynamicUnitPrice ? `on (max ${botConfig.maxUnitPrice})` : 'off'}`,
+    );
   }
 
   logger.info(`Single token at the time: ${botConfig.oneTokenAtATime}`);
@@ -142,6 +150,8 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Check honeypot: ${CHECK_IF_HONEYPOT}`);
     logger.info(`Max token tax: ${MAX_TOKEN_TAX >= 10000 ? 'disabled' : `${(MAX_TOKEN_TAX / 100).toFixed(2)}%`}`);
     logger.info(`Check top holders: ${CHECK_TOP_HOLDERS}${CHECK_TOP_HOLDERS ? ` (max ${MAX_TOP_HOLDER_PERCENTAGE}%)` : ''}`);
+    logger.info(`Check LP locked: ${CHECK_LP_LOCKED}${CHECK_LP_LOCKED ? ` (min ${MIN_LP_LOCKED_PERCENT}%)` : ''}`);
+    logger.info(`Simulate sell before buy: ${SIMULATE_SELL_BEFORE_BUY}`);
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
   }
@@ -195,6 +205,9 @@ const runListener = async () => {
     maxBuyRetries: MAX_BUY_RETRIES,
     unitLimit: COMPUTE_UNIT_LIMIT,
     unitPrice: COMPUTE_UNIT_PRICE,
+    dynamicUnitPrice: DYNAMIC_COMPUTE_UNIT_PRICE,
+    maxUnitPrice: MAX_COMPUTE_UNIT_PRICE,
+    simulateSellBeforeBuy: SIMULATE_SELL_BEFORE_BUY,
     takeProfit: TAKE_PROFIT,
     stopLoss: STOP_LOSS,
     trailingStopLoss: TRAILING_STOP_LOSS,

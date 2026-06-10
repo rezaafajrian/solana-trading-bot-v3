@@ -45,6 +45,9 @@ You should be able to see the following output along with many configurations yo
 - `ONE_TOKEN_AT_A_TIME` - Set to `true` to process buying one token at a time.
 - `COMPUTE_UNIT_LIMIT` - Compute limit used to calculate fees.
 - `COMPUTE_UNIT_PRICE` - Compute price used to calculate fees.
+- `DYNAMIC_COMPUTE_UNIT_PRICE` - Set to `true` to set the priority fee automatically from recent network congestion (default executor only). Pays more when the network is busy to land transactions, less when it is quiet.
+  - `COMPUTE_UNIT_PRICE` is used as the floor and `MAX_COMPUTE_UNIT_PRICE` as the ceiling.
+- `MAX_COMPUTE_UNIT_PRICE` - Maximum priority fee in micro lamports when `DYNAMIC_COMPUTE_UNIT_PRICE` is on.
 - `PRE_LOAD_EXISTING_MARKETS` - Bot will load all existing markets in memory on start.
   - This option should not be used with public RPC.
 - `CACHE_NEW_MARKETS` - Set to `true` to cache new markets.
@@ -115,6 +118,9 @@ Note: When using snipe list filters below will be disabled.
 - `MAX_TOKEN_TAX` - Maximum allowed transfer tax in basis points (100 = 1%). Tokens with a higher built-in sell/buy tax are skipped. Set `10000` to disable.
 - `CHECK_TOP_HOLDERS` - Set to `true` to skip pools where a single wallet (other than the pool itself) holds too large a share of the supply, which is a common dump setup.
 - `MAX_TOP_HOLDER_PERCENTAGE` - Maximum % of supply a single non-pool wallet may hold when `CHECK_TOP_HOLDERS` is on.
+- `CHECK_LP_LOCKED` - Set to `true` to require that a minimum percentage of LP has been burned/locked (a more precise version of `CHECK_IF_BURNED`). Computed from the pool's `lpReserve` vs the current LP supply.
+- `MIN_LP_LOCKED_PERCENT` - Minimum % of LP that must be burned/locked when `CHECK_LP_LOCKED` is on.
+- `SIMULATE_SELL_BEFORE_BUY` - Set to `true` to simulate a buy->sell round trip on-chain before every buy and skip the token if the sell leg fails. This is the strongest honeypot protection, but it adds latency and therefore costs snipe speed. If the simulation cannot run (e.g. RPC issue) the bot proceeds rather than skipping every trade.
 - `MIN_POOL_SIZE` - Bot will buy only if the pool size is greater than or equal the specified amount.
   - Set `0` to disable.
 - `MAX_POOL_SIZE` - Bot will buy only if the pool size is less than or equal the specified amount.

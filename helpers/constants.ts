@@ -28,6 +28,10 @@ export const LOG_LEVEL = retrieveEnvVariable('LOG_LEVEL', logger);
 export const ONE_TOKEN_AT_A_TIME = retrieveEnvVariable('ONE_TOKEN_AT_A_TIME', logger) === 'true';
 export const COMPUTE_UNIT_LIMIT = Number(retrieveEnvVariable('COMPUTE_UNIT_LIMIT', logger));
 export const COMPUTE_UNIT_PRICE = Number(retrieveEnvVariable('COMPUTE_UNIT_PRICE', logger));
+// When true, the default executor sets the compute unit price from recent network
+// congestion (clamped between COMPUTE_UNIT_PRICE as a floor and MAX_COMPUTE_UNIT_PRICE).
+export const DYNAMIC_COMPUTE_UNIT_PRICE = (process.env.DYNAMIC_COMPUTE_UNIT_PRICE ?? 'false') === 'true';
+export const MAX_COMPUTE_UNIT_PRICE = Number(process.env.MAX_COMPUTE_UNIT_PRICE ?? '1000000');
 export const PRE_LOAD_EXISTING_MARKETS = retrieveEnvVariable('PRE_LOAD_EXISTING_MARKETS', logger) === 'true';
 export const CACHE_NEW_MARKETS = retrieveEnvVariable('CACHE_NEW_MARKETS', logger) === 'true';
 export const TRANSACTION_EXECUTOR = retrieveEnvVariable('TRANSACTION_EXECUTOR', logger);
@@ -66,6 +70,11 @@ export const CHECK_IF_HONEYPOT = (process.env.CHECK_IF_HONEYPOT ?? 'true') === '
 export const MAX_TOKEN_TAX = Number(process.env.MAX_TOKEN_TAX ?? '10000');
 export const CHECK_TOP_HOLDERS = (process.env.CHECK_TOP_HOLDERS ?? 'false') === 'true';
 export const MAX_TOP_HOLDER_PERCENTAGE = Number(process.env.MAX_TOP_HOLDER_PERCENTAGE ?? '30');
+export const CHECK_LP_LOCKED = (process.env.CHECK_LP_LOCKED ?? 'false') === 'true';
+export const MIN_LP_LOCKED_PERCENT = Number(process.env.MIN_LP_LOCKED_PERCENT ?? '95');
+// Before each buy, simulate a buy->sell round trip on-chain and skip the token if the
+// sell leg fails (a strong honeypot test). Adds latency, so it costs snipe speed.
+export const SIMULATE_SELL_BEFORE_BUY = (process.env.SIMULATE_SELL_BEFORE_BUY ?? 'false') === 'true';
 export const MIN_POOL_SIZE = retrieveEnvVariable('MIN_POOL_SIZE', logger);
 export const MAX_POOL_SIZE = retrieveEnvVariable('MAX_POOL_SIZE', logger);
 export const USE_SNIPE_LIST = retrieveEnvVariable('USE_SNIPE_LIST', logger) === 'true';

@@ -7,6 +7,7 @@ import { RenouncedFreezeFilter } from './renounced.filter';
 import { PoolSizeFilter } from './pool-size.filter';
 import { TokenSecurityFilter } from './token-security.filter';
 import { TopHoldersFilter } from './top-holders.filter';
+import { LiquidityLockedFilter } from './liquidity-locked.filter';
 import {
   CHECK_IF_BURNED,
   CHECK_IF_FREEZABLE,
@@ -17,6 +18,8 @@ import {
   MAX_TOKEN_TAX,
   CHECK_TOP_HOLDERS,
   MAX_TOP_HOLDER_PERCENTAGE,
+  CHECK_LP_LOCKED,
+  MIN_LP_LOCKED_PERCENT,
   logger,
 } from '../helpers';
 
@@ -60,6 +63,10 @@ export class PoolFilters {
 
     if (CHECK_TOP_HOLDERS) {
       this.filters.push(new TopHoldersFilter(connection, MAX_TOP_HOLDER_PERCENTAGE));
+    }
+
+    if (CHECK_LP_LOCKED) {
+      this.filters.push(new LiquidityLockedFilter(connection, MIN_LP_LOCKED_PERCENT));
     }
 
     if (!args.minPoolSize.isZero() || !args.maxPoolSize.isZero()) {
