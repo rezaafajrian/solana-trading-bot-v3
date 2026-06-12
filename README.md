@@ -16,8 +16,10 @@ The current version has undergone multiple optimizations, including stability an
 To run the script you need to:
 
 
-- Convert some SOL to USDC or WSOL. (WSOL is more recommended. You can go to https://jup.ag/ and click “Manage” to wrap some SOL into WSOL. Click “MANUAL” to set “Use wSOL”, and finally click “Manage” to convert part of SOL to WSOL.)
-  - You need USDC or WSOL depending on the configuration set below.
+- Decide which quote token to use (set with `QUOTE_MINT` below):
+  - `SOL` (easiest) - just keep native SOL in your wallet. The bot wraps the exact buy amount to WSOL on each buy and unwraps the proceeds back to SOL on each sell, so there is no manual wrapping step.
+  - `WSOL` - you pre-wrap SOL into a WSOL token account yourself (go to https://jup.ag/, click “Manage”, set “Use wSOL”, then convert part of your SOL to WSOL).
+  - `USDC` - swap some SOL to USDC first.
 - Configure the script by updating `.env.example` file (remove the .example from the file name when done).
   - Check [Configuration](#configuration) section below
 - To run this program, you must have a NodeJS environment. If you don’t have it, please go to https://nodejs.org/en to download and install it first.
@@ -45,6 +47,9 @@ You should be able to see the following output along with many configurations yo
 - `ONE_TOKEN_AT_A_TIME` - Set to `true` to process buying one token at a time.
 - `COMPUTE_UNIT_LIMIT` - Compute limit used to calculate fees.
 - `COMPUTE_UNIT_PRICE` - Compute price used to calculate fees.
+- `DYNAMIC_COMPUTE_UNIT_PRICE` - Set to `true` to set the priority fee automatically from recent network congestion (default executor only). Pays more when the network is busy to land transactions, less when it is quiet.
+  - `COMPUTE_UNIT_PRICE` is used as the floor and `MAX_COMPUTE_UNIT_PRICE` as the ceiling.
+- `MAX_COMPUTE_UNIT_PRICE` - Maximum priority fee in micro lamports when `DYNAMIC_COMPUTE_UNIT_PRICE` is on.
 - `PRE_LOAD_EXISTING_MARKETS` - Bot will load all existing markets in memory on start.
   - This option should not be used with public RPC.
 - `CACHE_NEW_MARKETS` - Set to `true` to cache new markets.
@@ -57,7 +62,7 @@ You should be able to see the following output along with many configurations yo
 
 #### Buy
 
-- `QUOTE_MINT` - Which pools to snipe, USDC or WSOL.
+- `QUOTE_MINT` - Which pools to snipe and what to pay with: `SOL`, `WSOL`, or `USDC`. `SOL` and `WSOL` snipe the same pools; `SOL` auto-wraps/unwraps so you only hold native SOL, while `WSOL` expects a pre-funded WSOL account.
 - `QUOTE_AMOUNT` - Amount used to buy each new token.
 - `AUTO_BUY_DELAY` - Delay in milliseconds before buying a token.
 - `MAX_BUY_RETRIES` - Maximum number of retries for buying a token.
@@ -79,6 +84,13 @@ You should be able to see the following output along with many configurations yo
 - `STOP_LOSS` - Percentage loss at which to stop the loss.
   - Stop loss is calculated based on quote mint.
 - `SELL_SLIPPAGE` - Slippage %.
+- `TRAILING_STOP_LOSS` - Sell if the price falls this % from its highest point after the position is in profit.
+  - Lets winners run instead of exiting at a fixed take profit. Set `0` to disable.
+- `PARTIAL_TAKE_PROFIT` - % gain at which to take a partial profit (lock in some gains early).
+- `PARTIAL_SELL_PERCENT` - How much of the position to sell when `PARTIAL_TAKE_PROFIT` is reached. The rest keeps running (use with `TRAILING_STOP_LOSS`).
+  - Set both `PARTIAL_TAKE_PROFIT` and `PARTIAL_SELL_PERCENT` to `0` to disable and sell the whole position at `TAKE_PROFIT`.
+
+> Tip for maximizing the raw sniper (no KOL data needed): the most reliable edge is risk management, not picking winners. Keep the rug filters strict, use a partial take profit to bank gains, and let a trailing stop carry the rest so the occasional big winner pays for the losers.
 
 #### Snipe list
 
@@ -104,6 +116,13 @@ Note: When using snipe list filters below will be disabled.
 - `CHECK_IF_MINT_IS_RENOUNCED` - Set to `true` to buy tokens only if their mint is renounced.
 - `CHECK_IF_FREEZABLE` - Set to `true` to buy tokens only if they are not freezable.
 - `CHECK_IF_BURNED` - Set to `true` to buy tokens only if their liquidity pool is burned.
+- `CHECK_IF_HONEYPOT` - Set to `true` to reject Token-2022 tokens that can block sells or let the creator seize/freeze your tokens (non-transferable, transfer hook, permanent delegate, default-frozen). Classic SPL tokens always pass.
+- `MAX_TOKEN_TAX` - Maximum allowed transfer tax in basis points (100 = 1%). Tokens with a higher built-in sell/buy tax are skipped. Set `10000` to disable.
+- `CHECK_TOP_HOLDERS` - Set to `true` to skip pools where a single wallet (other than the pool itself) holds too large a share of the supply, which is a common dump setup.
+- `MAX_TOP_HOLDER_PERCENTAGE` - Maximum % of supply a single non-pool wallet may hold when `CHECK_TOP_HOLDERS` is on.
+- `CHECK_LP_LOCKED` - Set to `true` to require that a minimum percentage of LP has been burned/locked (a more precise version of `CHECK_IF_BURNED`). Computed from the pool's `lpReserve` vs the current LP supply.
+- `MIN_LP_LOCKED_PERCENT` - Minimum % of LP that must be burned/locked when `CHECK_LP_LOCKED` is on.
+- `SIMULATE_SELL_BEFORE_BUY` - Set to `true` to simulate a buy->sell round trip on-chain before every buy and skip the token if the sell leg fails. This is the strongest honeypot protection, but it adds latency and therefore costs snipe speed. If the simulation cannot run (e.g. RPC issue) the bot proceeds rather than skipping every trade.
 - `MIN_POOL_SIZE` - Bot will buy only if the pool size is greater than or equal the specified amount.
   - Set `0` to disable.
 - `MAX_POOL_SIZE` - Bot will buy only if the pool size is less than or equal the specified amount.

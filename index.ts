@@ -18,6 +18,12 @@ import {
   CHECK_IF_MINT_IS_RENOUNCED,
   CHECK_IF_FREEZABLE,
   CHECK_IF_BURNED,
+  CHECK_IF_HONEYPOT,
+  MAX_TOKEN_TAX,
+  CHECK_TOP_HOLDERS,
+  MAX_TOP_HOLDER_PERCENTAGE,
+  CHECK_LP_LOCKED,
+  MIN_LP_LOCKED_PERCENT,
   QUOTE_MINT,
   MAX_POOL_SIZE,
   MIN_POOL_SIZE,
@@ -32,9 +38,15 @@ import {
   AUTO_BUY_DELAY,
   COMPUTE_UNIT_LIMIT,
   COMPUTE_UNIT_PRICE,
+  DYNAMIC_COMPUTE_UNIT_PRICE,
+  MAX_COMPUTE_UNIT_PRICE,
+  SIMULATE_SELL_BEFORE_BUY,
   CACHE_NEW_MARKETS,
   TAKE_PROFIT,
   STOP_LOSS,
+  TRAILING_STOP_LOSS,
+  PARTIAL_TAKE_PROFIT,
+  PARTIAL_SELL_PERCENT,
   BUY_SLIPPAGE,
   SELL_SLIPPAGE,
   PRICE_CHECK_DURATION,
@@ -85,6 +97,9 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   } else {
     logger.info(`Compute Unit limit: ${botConfig.unitLimit}`);
     logger.info(`Compute Unit price (micro lamports): ${botConfig.unitPrice}`);
+    logger.info(
+      `Dynamic compute unit price: ${botConfig.dynamicUnitPrice ? `on (max ${botConfig.maxUnitPrice})` : 'off'}`,
+    );
   }
 
   logger.info(`Single token at the time: ${botConfig.oneTokenAtATime}`);
@@ -93,6 +108,7 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Log level: ${LOG_LEVEL}`);
 
   logger.info('- Buy -');
+  logger.info(`Quote token: ${QUOTE_MINT}${botConfig.wrapSol ? ' (auto-wrap native SOL)' : ''}`);
   logger.info(`Buy amount: ${botConfig.quoteAmount.toFixed()} ${botConfig.quoteToken.name}`);
   logger.info(`Auto buy delay: ${botConfig.autoBuyDelay} ms`);
   logger.info(`Max buy retries: ${botConfig.maxBuyRetries}`);
@@ -108,6 +124,14 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Price check duration: ${botConfig.priceCheckDuration} ms`);
   logger.info(`Take profit: ${botConfig.takeProfit}%`);
   logger.info(`Stop loss: ${botConfig.stopLoss}%`);
+  logger.info(`Trailing stop loss: ${botConfig.trailingStopLoss > 0 ? `${botConfig.trailingStopLoss}%` : 'disabled'}`);
+  logger.info(
+    `Partial take profit: ${
+      botConfig.partialTakeProfit > 0 && botConfig.partialSellPercent > 0
+        ? `sell ${botConfig.partialSellPercent}% at +${botConfig.partialTakeProfit}%`
+        : 'disabled'
+    }`,
+  );
 
   logger.info('- Snipe list -');
   logger.info(`Snipe list: ${botConfig.useSnipeList}`);
@@ -124,6 +148,11 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Check renounced: ${botConfig.checkRenounced}`);
     logger.info(`Check freezable: ${botConfig.checkFreezable}`);
     logger.info(`Check burned: ${botConfig.checkBurned}`);
+    logger.info(`Check honeypot: ${CHECK_IF_HONEYPOT}`);
+    logger.info(`Max token tax: ${MAX_TOKEN_TAX >= 10000 ? 'disabled' : `${(MAX_TOKEN_TAX / 100).toFixed(2)}%`}`);
+    logger.info(`Check top holders: ${CHECK_TOP_HOLDERS}${CHECK_TOP_HOLDERS ? ` (max ${MAX_TOP_HOLDER_PERCENTAGE}%)` : ''}`);
+    logger.info(`Check LP locked: ${CHECK_LP_LOCKED}${CHECK_LP_LOCKED ? ` (min ${MIN_LP_LOCKED_PERCENT}%)` : ''}`);
+    logger.info(`Simulate sell before buy: ${SIMULATE_SELL_BEFORE_BUY}`);
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
   }
@@ -168,6 +197,7 @@ const runListener = async () => {
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
+    wrapSol: QUOTE_MINT === 'SOL',
     oneTokenAtATime: ONE_TOKEN_AT_A_TIME,
     useSnipeList: USE_SNIPE_LIST,
     autoSell: AUTO_SELL,
@@ -177,8 +207,14 @@ const runListener = async () => {
     maxBuyRetries: MAX_BUY_RETRIES,
     unitLimit: COMPUTE_UNIT_LIMIT,
     unitPrice: COMPUTE_UNIT_PRICE,
+    dynamicUnitPrice: DYNAMIC_COMPUTE_UNIT_PRICE,
+    maxUnitPrice: MAX_COMPUTE_UNIT_PRICE,
+    simulateSellBeforeBuy: SIMULATE_SELL_BEFORE_BUY,
     takeProfit: TAKE_PROFIT,
     stopLoss: STOP_LOSS,
+    trailingStopLoss: TRAILING_STOP_LOSS,
+    partialTakeProfit: PARTIAL_TAKE_PROFIT,
+    partialSellPercent: PARTIAL_SELL_PERCENT,
     buySlippage: BUY_SLIPPAGE,
     sellSlippage: SELL_SLIPPAGE,
     priceCheckInterval: PRICE_CHECK_INTERVAL,
